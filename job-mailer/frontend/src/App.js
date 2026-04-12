@@ -60,11 +60,25 @@ export default function App() {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const wb = XLSX.read(ev.target.result, { type: "array" });
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-      setAllContacts(rows);
-      const cities = [...new Set(rows.map(r => r.City || r.city || r.CITY || r["المدينة"]).filter(Boolean))];
+
+      // قراءة كل الـ sheets ودمجها — اسم الـ sheet = المدينة
+      let allRows = [];
+      wb.SheetNames.forEach(sheetName => {
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName]);
+        rows.forEach(r => {
+          // استخدم اسم الـ sheet كمدينة إذا ما في عمود City
+          const city = r.City || r.city || r.CITY || r["المدينة"] || sheetName;
+          allRows.push({ ...r, City: city });
+        });
+      });
+
+      setAllContacts(allRows);
+
+      // المدن = أسماء الـ sheets
+      const cities = wb.SheetNames;
       setAvailableCities(cities);
       setSelectedCities([]);
+
       if (progressFileName && progressFileName !== file.name) {
         if (window.confirm(`عندك تقدم محفوظ للملف "${progressFileName}".\nاضغط OK لإعادة التعيين والبدء من أول`)) resetProgress();
       } else if (!progressFileName) {
