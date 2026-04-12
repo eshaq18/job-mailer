@@ -24,7 +24,7 @@ export default function App() {
   const [senderName, setSenderName] = useState("");
   const [dailyLimit, setDailyLimit] = useState(200);
   const [delaySeconds, setDelaySeconds] = useState(30);
-  const [serverUrl, setServerUrl] = useState("http://localhost:3001");
+const [serverUrl, setServerUrl] = useState("https://job-mailer-q5za.onrender.com");
   const [sending, setSending] = useState(false);
   const [sendLog, setSendLog] = useState([]);
   const [progress, setProgress] = useState(0);
