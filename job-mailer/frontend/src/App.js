@@ -4,6 +4,10 @@ import * as XLSX from "xlsx";
 const TABS = ["الإعداد", "الرسالة", "الإرسال", "التتبع", "دليل التثبيت"];
 const STORAGE_KEY = "job_mailer_progress";
 
+const getEmail = (c) => c.Email || c.email || c.EMAIL || c["الإيميل"] || c["البريد الإلكتروني"] || c["البريد"] || "";
+const getCompany = (c) => c.Company || c.company || c["الشركة"] || c["اسم الشركة"] || "";
+const getCity = (c) => c.City || c.city || c["المدينة"] || c["المنطقة"] || "";
+
 export default function App() {
   const [tab, setTab] = useState(0);
   const [allContacts, setAllContacts] = useState([]);
@@ -24,12 +28,17 @@ export default function App() {
   const [senderName, setSenderName] = useState("");
   const [dailyLimit, setDailyLimit] = useState(200);
   const [delaySeconds, setDelaySeconds] = useState(30);
-const [serverUrl, setServerUrl] = useState("https://job-mailer-q5za.onrender.com");
+  const [serverUrl, setServerUrl] = useState("https://job-mailer-q5za.onrender.com");
   const [sending, setSending] = useState(false);
   const [sendLog, setSendLog] = useState([]);
   const [progress, setProgress] = useState(0);
   const [statusLabel, setStatusLabel] = useState("جاهز");
   const [trackFilter, setTrackFilter] = useState("all");
+
+  // SMTP test state
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+
   const bodyRef = useRef();
 
   useEffect(() => {
@@ -42,15 +51,29 @@ const [serverUrl, setServerUrl] = useState("https://job-mailer-q5za.onrender.com
     }
   }, []);
 
-  const saveProgress = (index, total, fileName) => {
+  const saveProgress = (index, total, fileName) =>
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ lastSentIndex: index, totalSentAllTime: total, fileName, updatedAt: new Date().toISOString() }));
-  };
 
   const resetProgress = () => {
     localStorage.removeItem(STORAGE_KEY);
-    setLastSentIndex(0);
-    setTotalSentAllTime(0);
-    setProgressFileName("");
+    setLastSentIndex(0); setTotalSentAllTime(0); setProgressFileName("");
+  };
+
+  const testSmtp = async () => {
+    if (!smtpUser || !smtpPass) { setTestResult({ success: false, error: "أدخل الإيميل وكلمة المرور أولاً" }); return; }
+    setTesting(true); setTestResult(null);
+    try {
+      const res = await fetch(`${serverUrl}/test-smtp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ smtpUser, smtpPass, smtpService, smtpHost, smtpPort })
+      });
+      const data = await res.json();
+      setTestResult(data);
+    } catch (err) {
+      setTestResult({ success: false, error: "تعذر الاتصال بالسيرفر — تأكد أن السيرفر يعمل" });
+    }
+    setTesting(false);
   };
 
   const handleExcel = (e) => {
@@ -60,27 +83,19 @@ const [serverUrl, setServerUrl] = useState("https://job-mailer-q5za.onrender.com
     const reader = new FileReader();
     reader.onload = (ev) => {
       const wb = XLSX.read(ev.target.result, { type: "array" });
-
-      // قراءة كل الـ sheets ودمجها — اسم الـ sheet = المدينة
       let allRows = [];
       wb.SheetNames.forEach(sheetName => {
         const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName]);
         rows.forEach(r => {
-          // استخدم اسم الـ sheet كمدينة إذا ما في عمود City
-          const city = r.City || r.city || r.CITY || r["المدينة"] || sheetName;
+          const city = getCity(r) || sheetName;
           allRows.push({ ...r, City: city });
         });
       });
-
       setAllContacts(allRows);
-
-      // المدن = أسماء الـ sheets
-      const cities = wb.SheetNames;
-      setAvailableCities(cities);
+      setAvailableCities(wb.SheetNames);
       setSelectedCities([]);
-
       if (progressFileName && progressFileName !== file.name) {
-        if (window.confirm(`عندك تقدم محفوظ للملف "${progressFileName}".\nاضغط OK لإعادة التعيين والبدء من أول`)) resetProgress();
+        if (window.confirm(`عندك تقدم محفوظ للملف "${progressFileName}".\nاضغط OK لإعادة التعيين`)) resetProgress();
       } else if (!progressFileName) {
         setProgressFileName(file.name);
         saveProgress(0, 0, file.name);
@@ -91,9 +106,10 @@ const [serverUrl, setServerUrl] = useState("https://job-mailer-q5za.onrender.com
 
   const filteredContacts = selectedCities.length === 0
     ? allContacts
-    : allContacts.filter(c => selectedCities.includes(c.City || c.city || c.CITY || c["المدينة"] || ""));
+    : allContacts.filter(c => selectedCities.includes(getCity(c)));
 
   const toggleCity = (city) => setSelectedCities(prev => prev.includes(city) ? prev.filter(c => c !== city) : [...prev, city]);
+
   const insertVar = (v) => {
     const ta = bodyRef.current;
     if (!ta) return;
@@ -114,9 +130,13 @@ const [serverUrl, setServerUrl] = useState("https://job-mailer-q5za.onrender.com
     setStatusLabel(`جارٍ الإرسال... (${startIndex + 1}–${startIndex + toSendToday.length} من ${filteredContacts.length})`);
 
     const formData = new FormData();
-    ["subject","body","smtpUser","smtpPass","smtpService","smtpHost","smtpPort","senderName","serverUrl"].forEach(k => formData.append(k, eval(k)));
-    formData.append("dailyLimit", toSendToday.length);
+    formData.append("subject", subject); formData.append("body", body);
+    formData.append("smtpUser", smtpUser); formData.append("smtpPass", smtpPass);
+    formData.append("smtpService", smtpService); formData.append("smtpHost", smtpHost);
+    formData.append("smtpPort", smtpPort); formData.append("senderName", senderName);
+    formData.append("serverUrl", serverUrl); formData.append("dailyLimit", toSendToday.length);
     formData.append("delaySeconds", delaySeconds);
+
     const ws = XLSX.utils.json_to_sheet(toSendToday);
     const wb2 = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb2, ws, "contacts");
@@ -138,9 +158,8 @@ const [serverUrl, setServerUrl] = useState("https://job-mailer-q5za.onrender.com
             const newIdx = startIndex + doneCount;
             const newTotal = totalSentAllTime + doneCount;
             setSendLog(prev => [...prev, { ...item, opens: 0 }]);
-            setProgress(Math.round((doneCount / toSendToday.length) * 100));
-            setLastSentIndex(newIdx);
-            setTotalSentAllTime(newTotal);
+            setProgress(Math.round(doneCount / toSendToday.length * 100));
+            setLastSentIndex(newIdx); setTotalSentAllTime(newTotal);
             saveProgress(newIdx, newTotal, excelName);
           } catch {}
         });
@@ -198,7 +217,7 @@ const [serverUrl, setServerUrl] = useState("https://job-mailer-q5za.onrender.com
               {excelName ? <>✅ {excelName} — {allContacts.length} جهة اتصال</> : <>📂 اضغط لرفع ملف Excel أو CSV</>}
             </div>
             <input id="xl-input" type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={handleExcel} />
-            <p className="tip">أعمدة: Email (مطلوب) — Company, ContactName, City (اختيارية)</p>
+            <p className="tip">يدعم أسماء الأعمدة العربية والإنجليزية — كل sheet = مدينة تلقائياً</p>
           </div>
 
           {availableCities.length > 0 && (
@@ -229,10 +248,10 @@ const [serverUrl, setServerUrl] = useState("https://job-mailer-q5za.onrender.com
               </div>
               <div className="table-wrap">
                 <table>
-                  <thead><tr><th style={{ width: "36%" }}>الإيميل</th><th style={{ width: "26%" }}>الشركة</th><th style={{ width: "20%" }}>المدينة</th><th style={{ width: "18%" }}>الاسم</th></tr></thead>
+                  <thead><tr><th style={{ width: "38%" }}>الإيميل</th><th style={{ width: "28%" }}>الشركة</th><th style={{ width: "20%" }}>المدينة</th><th style={{ width: "14%" }}>الاسم</th></tr></thead>
                   <tbody>
                     {filteredContacts.slice(0, 8).map((c, i) => (
-                      <tr key={i}><td style={{ fontSize: 12 }}>{c.Email || c.email || "—"}</td><td>{c.Company || c.company || "—"}</td><td>{c.City || c.city || c["المدينة"] || "—"}</td><td>{c.ContactName || "—"}</td></tr>
+                      <tr key={i}><td style={{ fontSize: 12 }}>{getEmail(c) || "—"}</td><td>{getCompany(c) || "—"}</td><td>{getCity(c) || "—"}</td><td>{c.ContactName || c["الاسم"] || "—"}</td></tr>
                     ))}
                     {filteredContacts.length > 8 && <tr><td colSpan={4} style={{ color: "var(--text-faint)", fontSize: 12 }}>و {filteredContacts.length - 8} آخرين...</td></tr>}
                   </tbody>
@@ -254,6 +273,17 @@ const [serverUrl, setServerUrl] = useState("https://job-mailer-q5za.onrender.com
             {smtpService === "custom" && <div className="grid2"><div className="field"><label>SMTP Host</label><input type="text" value={smtpHost} onChange={e => setSmtpHost(e.target.value)} /></div><div className="field"><label>Port</label><input type="number" value={smtpPort} onChange={e => setSmtpPort(e.target.value)} /></div></div>}
             <div className="field"><label>App Password</label><input type="password" value={smtpPass} onChange={e => setSmtpPass(e.target.value)} placeholder="xxxx xxxx xxxx xxxx" /><p className="tip">Gmail: الإعدادات ← الأمان ← كلمات مرور التطبيقات</p></div>
             <div className="field"><label>رابط السيرفر (Backend URL)</label><input type="text" value={serverUrl} onChange={e => setServerUrl(e.target.value)} /></div>
+
+            {/* زر اختبار الاتصال */}
+            <button onClick={testSmtp} disabled={testing} style={{ width: "100%", padding: "10px", marginTop: 4, fontSize: 14, fontWeight: 500, border: "1px solid var(--border-strong)", borderRadius: "var(--radius-sm)", background: "transparent", cursor: "pointer" }}>
+              {testing ? "⏳ جارٍ الاختبار..." : "🔌 اختبر الاتصال بالإيميل"}
+            </button>
+
+            {testResult && (
+              <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: "var(--radius-sm)", background: testResult.success ? "var(--green-bg)" : "var(--red-bg)", color: testResult.success ? "var(--green)" : "var(--red)", fontSize: 13, fontWeight: 500 }}>
+                {testResult.success ? "✅ " + testResult.message : "❌ فشل الاتصال: " + testResult.error}
+              </div>
+            )}
           </div>
         </>)}
 
@@ -305,16 +335,13 @@ const [serverUrl, setServerUrl] = useState("https://job-mailer-q5za.onrender.com
               </div>
             </div>
           )}
-
           <div className="stats-row">
             <div className="stat-card"><div className="stat-num">{filteredContacts.length}</div><div className="stat-lbl">إجمالي الملف</div></div>
             <div className="stat-card"><div className="stat-num" style={{ color: "var(--green)" }}>{sent}</div><div className="stat-lbl">أُرسل اليوم</div></div>
             <div className="stat-card"><div className="stat-num" style={{ color: "var(--purple)" }}>{opened}</div><div className="stat-lbl">فُتح</div></div>
             <div className="stat-card"><div className="stat-num" style={{ color: "var(--red)" }}>{failed}</div><div className="stat-lbl">فشل</div></div>
           </div>
-
           <div className="progress-wrap"><div className="progress-fill" style={{ width: progress + "%" }} /></div>
-
           <div className="card">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
               <div className="card-title" style={{ margin: 0 }}>سجل الإرسال اليوم</div>
@@ -326,23 +353,18 @@ const [serverUrl, setServerUrl] = useState("https://job-mailer-q5za.onrender.com
               </div>
             )}
             {sendLog.length > 0 && (
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th style={{ width: "32%" }}>الإيميل</th><th style={{ width: "20%" }}>الشركة</th><th style={{ width: "14%" }}>المدينة</th><th style={{ width: "17%" }}>وصل؟</th><th style={{ width: "17%" }}>فُتح؟</th></tr></thead>
-                  <tbody>
-                    {sendLog.map((r, i) => (
-                      <tr key={i}>
-                        <td style={{ fontSize: 12 }}>{r.email}</td><td>{r.company || "—"}</td><td>{r.city || "—"}</td>
-                        <td><span className={`badge ${r.status === "sent" ? "green" : "red"}`}>{r.status === "sent" ? "✓ وصل" : "✗ فشل"}</span></td>
-                        <td><span className={`badge ${r.opens > 0 ? "purple" : "gray"}`}>{r.opens > 0 ? "فُتح" : "لا"}</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <div className="table-wrap"><table>
+                <thead><tr><th style={{ width: "32%" }}>الإيميل</th><th style={{ width: "20%" }}>الشركة</th><th style={{ width: "14%" }}>المدينة</th><th style={{ width: "17%" }}>وصل؟</th><th style={{ width: "17%" }}>فُتح؟</th></tr></thead>
+                <tbody>{sendLog.map((r, i) => (
+                  <tr key={i}>
+                    <td style={{ fontSize: 12 }}>{r.email}</td><td>{r.company || "—"}</td><td>{r.city || "—"}</td>
+                    <td><span className={`badge ${r.status === "sent" ? "green" : "red"}`}>{r.status === "sent" ? "✓ وصل" : "✗ فشل"}</span></td>
+                    <td><span className={`badge ${r.opens > 0 ? "purple" : "gray"}`}>{r.opens > 0 ? "فُتح" : "لا"}</span></td>
+                  </tr>
+                ))}</tbody>
+              </table></div>
             )}
           </div>
-
           <div className="info-box">
             {lastSentIndex > 0 ? `سيُرسل من رقم ${lastSentIndex + 1} — ${Math.min(remainingCount, dailyLimit)} رسالة اليوم` : "تأكد أن السيرفر يعمل قبل البدء"}
           </div>
@@ -371,16 +393,14 @@ const [serverUrl, setServerUrl] = useState("https://job-mailer-q5za.onrender.com
               ? <div style={{ textAlign: "center", padding: "2rem 0", color: "var(--text-faint)", fontSize: 13 }}>{sendLog.length === 0 ? "ابدأ الإرسال أولاً" : "لا توجد نتائج"}</div>
               : <div className="table-wrap"><table>
                   <thead><tr><th style={{ width: "30%" }}>الإيميل</th><th style={{ width: "20%" }}>الشركة</th><th style={{ width: "16%" }}>المدينة</th><th style={{ width: "14%" }}>وصل؟</th><th style={{ width: "12%" }}>فُتح؟</th><th style={{ width: "8%" }}>مرات</th></tr></thead>
-                  <tbody>
-                    {filteredTrack.map((r, i) => (
-                      <tr key={i}>
-                        <td style={{ fontSize: 12 }}>{r.email}</td><td>{r.company || "—"}</td><td>{r.city || "—"}</td>
-                        <td><span className={`badge ${r.status === "sent" ? "green" : "red"}`}>{r.status === "sent" ? "✓ وصل" : "✗ فشل"}</span></td>
-                        <td><span className={`badge ${r.opens > 0 ? "purple" : "gray"}`}>{r.opens > 0 ? "فُتح" : "لا"}</span></td>
-                        <td style={{ textAlign: "center" }}>{r.opens || 0}</td>
-                      </tr>
-                    ))}
-                  </tbody>
+                  <tbody>{filteredTrack.map((r, i) => (
+                    <tr key={i}>
+                      <td style={{ fontSize: 12 }}>{r.email}</td><td>{r.company || "—"}</td><td>{r.city || "—"}</td>
+                      <td><span className={`badge ${r.status === "sent" ? "green" : "red"}`}>{r.status === "sent" ? "✓ وصل" : "✗ فشل"}</span></td>
+                      <td><span className={`badge ${r.opens > 0 ? "purple" : "gray"}`}>{r.opens > 0 ? "فُتح" : "لا"}</span></td>
+                      <td style={{ textAlign: "center" }}>{r.opens || 0}</td>
+                    </tr>
+                  ))}</tbody>
                 </table></div>
             }
           </div>
@@ -388,23 +408,21 @@ const [serverUrl, setServerUrl] = useState("https://job-mailer-q5za.onrender.com
 
         {tab === 4 && (<>
           <div className="card">
-            <div className="card-title">هيكل ملف Excel</div>
+            <div className="card-title">هيكل ملف Excel المدعوم</div>
             <div className="table-wrap"><table>
-              <thead><tr><th>Email</th><th>Company</th><th>ContactName</th><th>City</th></tr></thead>
+              <thead><tr><th>Email / الإيميل</th><th>Company / الشركة</th><th>City / المدينة</th></tr></thead>
               <tbody>
-                <tr><td>hr@google.com</td><td>Google</td><td>Ahmed</td><td>الرياض</td></tr>
-                <tr><td>jobs@meta.com</td><td>Meta</td><td>Sara</td><td>جدة</td></tr>
-                <tr><td>talent@amazon.com</td><td>Amazon</td><td></td><td>الدمام</td></tr>
+                <tr><td>hr@google.com</td><td>Google</td><td>الرياض</td></tr>
+                <tr><td>jobs@meta.com</td><td>Meta</td><td>جدة</td></tr>
               </tbody>
             </table></div>
-            <p className="tip" style={{ marginTop: 8 }}>City اختياري — لكن لازم يكون موجود لاستخدام فلتر المدن</p>
+            <p className="tip" style={{ marginTop: 8 }}>يدعم الأسماء العربية والإنجليزية — كل sheet = مدينة تلقائياً</p>
           </div>
           <div className="card">
             <div className="card-title">ميزة الاستكمال اليومي</div>
             <div style={{ fontSize: 13, lineHeight: 2, color: "var(--text-muted)" }}>
               ✓ ارفع نفس الملف كل يوم — التطبيق يتذكر وين وقفت<br />
               ✓ اضغط "استكمال الإرسال" وسيبدأ من حيث توقف<br />
-              ✓ لما ينتهي الملف يظهر لك إشعار 🎉<br />
               ✓ اضغط "إعادة تعيين" للبدء من الأول
             </div>
           </div>
@@ -414,7 +432,7 @@ const [serverUrl, setServerUrl] = useState("https://job-mailer-q5za.onrender.com
               ✓ تأخير 30 ثانية بين كل رسالة<br />
               ✓ لا تتجاوز 200 إيميل يومياً<br />
               ✓ استخدم App Password<br />
-              ✓ خصّص كل رسالة بـ {"{{CompanyName}}"}
+              ✓ اختبر الاتصال قبل الإرسال
             </div>
           </div>
         </>)}
