@@ -63,11 +63,15 @@ export default function App() {
     if (!smtpUser || !smtpPass) { setTestResult({ success: false, error: "أدخل الإيميل وكلمة المرور أولاً" }); return; }
     setTesting(true); setTestResult(null);
     try {
-      const res = await fetch(`${serverUrl}/test-smtp`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ smtpUser, smtpPass, smtpService, smtpHost, smtpPort })
-      });
+     const controller = new AbortController();
+const timer = setTimeout(() => controller.abort(), 60000);
+const res = await fetch(`${serverUrl}/test-smtp`, {
+  signal: controller.signal,
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ smtpUser, smtpPass, smtpService, smtpHost, smtpPort })
+});
+clearTimeout(timer);
       const data = await res.json();
       setTestResult(data);
     } catch (err) {
