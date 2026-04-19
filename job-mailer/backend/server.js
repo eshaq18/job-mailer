@@ -13,7 +13,6 @@ app.use(express.json());
 
 const trackingStore = {};
 
-// helper: اقرأ الإيميل من أي اسم عمود
 const getEmail = (c) =>
   c.Email || c.email || c.EMAIL ||
   c["الإيميل"] || c["البريد الإلكتروني"] || c["البريد"] || "";
@@ -27,16 +26,35 @@ const getContact = (c) =>
 const getCity = (c) =>
   c.City || c.city || c["المدينة"] || c["المنطقة"] || "";
 
+const makeTransportConfig = (smtpService, smtpUser, smtpPass, smtpHost, smtpPort) => {
+  if (smtpService && smtpService !== "custom") {
+    return {
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
+      auth: { user: smtpUser, pass: smtpPass },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 15000,
+    };
+  }
+  return {
+    host: smtpHost,
+    port: parseInt(smtpPort) || 587,
+    secure: false,
+    auth: { user: smtpUser, pass: smtpPass },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 15000,
+  };
+};
+
 // ─── Test SMTP connection ──────────────────────────────────────────────────
 app.post("/test-smtp", async (req, res) => {
   const { smtpUser, smtpPass, smtpService, smtpHost, smtpPort } = req.body;
   if (!smtpUser || !smtpPass) return res.status(400).json({ success: false, error: "أدخل الإيميل وكلمة المرور" });
-  const transportConfig =
-    smtpService && smtpService !== "custom"
-      ? { service: smtpService, auth: { user: smtpUser, pass: smtpPass }, connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 10000 }
-      : { host: smtpHost, port: parseInt(smtpPort) || 587, secure: false, auth: { user: smtpUser, pass: smtpPass }, connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 10000 };
   try {
-    const transporter = nodemailer.createTransport(transportConfig);
+    const transporter = nodemailer.createTransport(makeTransportConfig(smtpService, smtpUser, smtpPass, smtpHost, smtpPort));
     await transporter.verify();
     res.json({ success: true, message: "تم الاتصال بنجاح ✅" });
   } catch (err) {
@@ -72,12 +90,7 @@ app.post("/send", upload.fields([{ name: "excel" }, { name: "cv" }]), async (req
   const cvBuffer = req.files["cv"][0].buffer;
   const cvName = req.files["cv"][0].originalname || "CV.pdf";
 
-  const transportConfig =
-    smtpService && smtpService !== "custom"
-      ? { service: smtpService, auth: { user: smtpUser, pass: smtpPass } }
-      : { host: smtpHost, port: parseInt(smtpPort) || 587, secure: false, auth: { user: smtpUser, pass: smtpPass } };
-
-  const transporter = nodemailer.createTransport(transportConfig);
+  const transporter = nodemailer.createTransport(makeTransportConfig(smtpService, smtpUser, smtpPass, smtpHost, smtpPort));
 
   res.setHeader("Content-Type", "application/x-ndjson");
   res.setHeader("Transfer-Encoding", "chunked");
