@@ -1,6 +1,5 @@
 require("dotenv").config();
 const express = require("express");
-const nodemailer = require("nodemailer");
 const multer = require("multer");
 const XLSX = require("xlsx");
 const cors = require("cors");
@@ -26,27 +25,38 @@ const getContact = (c) =>
 const getCity = (c) =>
   c.City || c.city || c["المدينة"] || c["المنطقة"] || "";
 
-const makeTransporter = (smtpPass) => nodemailer.createTransport({
-  host: "smtp-relay.brevo.com",
-  port: 587,
-  secure: false,
-  auth: {
-    user: "a89334001@smtp-brevo.com",
-    pass: smtpPass
-  },
-  connectionTimeout: 15000,
-  greetingTimeout: 15000,
-  socketTimeout: 15000,
-});
+const sendViaBrevo = async (apiKey, fromEmail, fromName, to, subject, text, html, attachmentName, attachmentBuffer) => {
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      "api-key": apiKey,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      sender: { email: fromEmail, name: fromName },
+      to: [{ email: to }],
+      subject,
+      textContent: text,
+      htmlContent: html,
+      attachment: [{ name: attachmentName, content: attachmentBuffer.toString("base64") }]
+    })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || JSON.stringify(data));
+  return data;
+};
 
-// ─── Test SMTP connection ──────────────────────────────────────────────────
+// ─── Test connection ──────────────────────────────────────────────────
 app.post("/test-smtp", async (req, res) => {
-  const { smtpPass } = req.body;
-  if (!smtpPass) return res.status(400).json({ success: false, error: "أدخل الـ SMTP Key" });
+  const { smtpUser, smtpPass } = req.body;
+  if (!smtpPass) return res.status(400).json({ success: false, error: "أدخل الـ API Key" });
   try {
-    const transporter = makeTransporter(smtpPass);
-    await transporter.verify();
-    res.json({ success: true, message: "تم الاتصال بنجاح ✅" });
+    const testRes = await fetch("https://api.brevo.com/v3/account", {
+      headers: { "api-key": smtpPass }
+    });
+    const data = await testRes.json();
+    if (testRes.ok) res.json({ success: true, message: "تم الاتصال بنجاح ✅" });
+    else res.json({ success: false, error: data.message });
   } catch (err) {
     res.json({ success: false, error: err.message });
   }
@@ -80,8 +90,6 @@ app.post("/send", upload.fields([{ name: "excel" }, { name: "cv" }]), async (req
   const cvBuffer = req.files["cv"][0].buffer;
   const cvName = req.files["cv"][0].originalname || "CV.pdf";
 
-  const transporter = makeTransporter(smtpPass);
-
   res.setHeader("Content-Type", "application/x-ndjson");
   res.setHeader("Transfer-Encoding", "chunked");
 
@@ -104,14 +112,17 @@ app.post("/send", upload.fields([{ name: "excel" }, { name: "cv" }]), async (req
     const htmlBody = fill(body, c).replace(/\n/g, "<br>") + trackImg;
 
     try {
-      await transporter.sendMail({
-        from: `"${senderName}" <${smtpUser}>`,
-        to: email,
-        subject: fill(subject, c),
-        text: fill(body, c),
-        html: htmlBody,
-        attachments: [{ filename: cvName, content: cvBuffer }],
-      });
+      await sendViaBrevo(
+        smtpPass,
+        smtpUser,
+        senderName,
+        email,
+        fill(subject, c),
+        fill(body, c),
+        htmlBody,
+        cvName,
+        cvBuffer
+      );
       trackingStore[trackId] = { email, company: getCompany(c), opens: 0, times: [], sentAt: new Date().toISOString() };
       res.write(JSON.stringify({ email, company: getCompany(c), city: getCity(c), status: "sent", trackId, index: i }) + "\n");
     } catch (err) {
