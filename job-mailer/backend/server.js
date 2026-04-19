@@ -42,15 +42,7 @@ app.post("/test-smtp", async (req, res) => {
   } catch (err) {
     res.json({ success: false, error: err.message });
   }
-});
-  try {
-    const transporter = nodemailer.createTransport(transportConfig);
-    await transporter.verify();
-    res.json({ success: true, message: "تم الاتصال بنجاح ✅" });
-  } catch (err) {
-    res.json({ success: false, error: err.message });
-  }
-});
+
 
 // ─── Tracking pixel ────────────────────────────────────────────────────────
 app.get("/pixel/:id", (req, res) => {
