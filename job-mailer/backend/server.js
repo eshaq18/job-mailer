@@ -126,6 +126,7 @@ app.post("/send", upload.fields([{ name: "excel" }, { name: "cv" }]), async (req
       trackingStore[trackId] = { email, company: getCompany(c), opens: 0, times: [], sentAt: new Date().toISOString() };
       res.write(JSON.stringify({ email, company: getCompany(c), city: getCity(c), status: "sent", trackId, index: i }) + "\n");
     } catch (err) {
+      console.error("Send error:", err.message);
       res.write(JSON.stringify({ email, company: getCompany(c), city: getCity(c), status: "failed", error: err.message, index: i }) + "\n");
     }
 
