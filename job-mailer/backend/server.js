@@ -1,6 +1,5 @@
 require("dotenv").config();
 const express = require("express");
-const nodemailer = require("nodemailer");
 const multer = require("multer");
 const XLSX = require("xlsx");
 const cors = require("cors");
@@ -26,37 +25,38 @@ const getContact = (c) =>
 const getCity = (c) =>
   c.City || c.city || c["المدينة"] || c["المنطقة"] || "";
 
-const makeTransportConfig = (smtpService, smtpUser, smtpPass, smtpHost, smtpPort) => {
-  if (smtpService && smtpService !== "custom") {
-    return {
-      host: "smtp.gmail.com",
-      port: 465,
-      secure: true,
-      auth: { user: smtpUser, pass: smtpPass },
-      connectionTimeout: 15000,
-      greetingTimeout: 15000,
-      socketTimeout: 15000,
-    };
-  }
-  return {
-    host: smtpHost,
-    port: parseInt(smtpPort) || 587,
-    secure: false,
-    auth: { user: smtpUser, pass: smtpPass },
-    connectionTimeout: 15000,
-    greetingTimeout: 15000,
-    socketTimeout: 15000,
+const sendViaResend = async (apiKey, from, to, subject, text, html, attachmentName, attachmentBuffer) => {
+  const body = {
+    from,
+    to: [to],
+    subject,
+    text,
+    html,
+    attachments: [{ filename: attachmentName, content: attachmentBuffer.toString("base64") }]
   };
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || "Resend error");
+  return data;
 };
 
 // ─── Test SMTP connection ──────────────────────────────────────────────────
 app.post("/test-smtp", async (req, res) => {
-  const { smtpUser, smtpPass, smtpService, smtpHost, smtpPort } = req.body;
-  if (!smtpUser || !smtpPass) return res.status(400).json({ success: false, error: "أدخل الإيميل وكلمة المرور" });
+  const { smtpUser, smtpPass, resendApiKey } = req.body;
+  if (!resendApiKey && (!smtpUser || !smtpPass)) return res.status(400).json({ success: false, error: "أدخل بيانات الاتصال" });
   try {
-    const transporter = nodemailer.createTransport(makeTransportConfig(smtpService, smtpUser, smtpPass, smtpHost, smtpPort));
-    await transporter.verify();
-    res.json({ success: true, message: "تم الاتصال بنجاح ✅" });
+    const testRes = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${resendApiKey || smtpPass}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: "onboarding@resend.dev", to: [smtpUser], subject: "Test", text: "Test connection" })
+    });
+    const data = await testRes.json();
+    if (testRes.ok) res.json({ success: true, message: "تم الاتصال بنجاح ✅" });
+    else res.json({ success: false, error: data.message });
   } catch (err) {
     res.json({ success: false, error: err.message });
   }
@@ -78,7 +78,8 @@ app.get("/tracking", (req, res) => res.json(trackingStore));
 
 // ─── Send emails ───────────────────────────────────────────────────────────
 app.post("/send", upload.fields([{ name: "excel" }, { name: "cv" }]), async (req, res) => {
-  const { subject, body, smtpUser, smtpPass, smtpService, smtpHost, smtpPort, senderName, dailyLimit, delaySeconds, serverUrl } = req.body;
+  const { subject, body, smtpUser, smtpPass, senderName, dailyLimit, delaySeconds, serverUrl } = req.body;
+  const resendApiKey = smtpPass;
 
   if (!req.files?.excel || !req.files?.cv)
     return res.status(400).json({ error: "Excel and CV files are required" });
@@ -89,8 +90,6 @@ app.post("/send", upload.fields([{ name: "excel" }, { name: "cv" }]), async (req
   const contacts = rows.slice(0, limit);
   const cvBuffer = req.files["cv"][0].buffer;
   const cvName = req.files["cv"][0].originalname || "CV.pdf";
-
-  const transporter = nodemailer.createTransport(makeTransportConfig(smtpService, smtpUser, smtpPass, smtpHost, smtpPort));
 
   res.setHeader("Content-Type", "application/x-ndjson");
   res.setHeader("Transfer-Encoding", "chunked");
@@ -114,14 +113,16 @@ app.post("/send", upload.fields([{ name: "excel" }, { name: "cv" }]), async (req
     const htmlBody = fill(body, c).replace(/\n/g, "<br>") + trackImg;
 
     try {
-      await transporter.sendMail({
-        from: `"${senderName}" <${smtpUser}>`,
-        to: email,
-        subject: fill(subject, c),
-        text: fill(body, c),
-        html: htmlBody,
-        attachments: [{ filename: cvName, content: cvBuffer }],
-      });
+      await sendViaResend(
+        resendApiKey,
+        `${senderName} <onboarding@resend.dev>`,
+        email,
+        fill(subject, c),
+        fill(body, c),
+        htmlBody,
+        cvName,
+        cvBuffer
+      );
       trackingStore[trackId] = { email, company: getCompany(c), opens: 0, times: [], sentAt: new Date().toISOString() };
       res.write(JSON.stringify({ email, company: getCompany(c), city: getCity(c), status: "sent", trackId, index: i }) + "\n");
     } catch (err) {
