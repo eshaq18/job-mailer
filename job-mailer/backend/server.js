@@ -42,7 +42,7 @@ app.post("/test-smtp", async (req, res) => {
   } catch (err) {
     res.json({ success: false, error: err.message });
   }
-
+});
 
 // ─── Tracking pixel ────────────────────────────────────────────────────────
 app.get("/pixel/:id", (req, res) => {
