@@ -31,12 +31,18 @@ const getCity = (c) =>
 app.post("/test-smtp", async (req, res) => {
   const { smtpUser, smtpPass, smtpService, smtpHost, smtpPort } = req.body;
   if (!smtpUser || !smtpPass) return res.status(400).json({ success: false, error: "أدخل الإيميل وكلمة المرور" });
-
   const transportConfig =
     smtpService && smtpService !== "custom"
-      ? { service: smtpService, auth: { user: smtpUser, pass: smtpPass } }
-      : { host: smtpHost, port: parseInt(smtpPort) || 587, secure: false, auth: { user: smtpUser, pass: smtpPass } };
-
+      ? { service: smtpService, auth: { user: smtpUser, pass: smtpPass }, connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 10000 }
+      : { host: smtpHost, port: parseInt(smtpPort) || 587, secure: false, auth: { user: smtpUser, pass: smtpPass }, connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 10000 };
+  try {
+    const transporter = nodemailer.createTransport(transportConfig);
+    await transporter.verify();
+    res.json({ success: true, message: "تم الاتصال بنجاح ✅" });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
+});
   try {
     const transporter = nodemailer.createTransport(transportConfig);
     await transporter.verify();
