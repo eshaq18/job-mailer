@@ -124,6 +124,7 @@ app.post("/send", upload.fields([{ name: "excel" }, { name: "cv" }]), async (req
   res.end();
 });
 
+app.get("/", (req, res) => res.send("Job Mailer API is running ✅"));
 app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date().toISOString() }));
 
 const PORT = process.env.PORT || 3001;
