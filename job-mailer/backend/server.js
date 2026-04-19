@@ -126,5 +126,5 @@ app.post("/send", upload.fields([{ name: "excel" }, { name: "cv" }]), async (req
 
 app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date().toISOString() }));
 
-const PORT = process.env.PORT || 1000;
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
